@@ -36,7 +36,7 @@ async def get_embedding(text: str) -> list[float] | None:
             from openai import AsyncOpenAI
             client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
             response = await client.embeddings.create(
-                model="text-embedding-3-small",
+                model="text-embedding-3-large",
                 input=text,
                 dimensions=EMBEDDING_DIM,
             )
