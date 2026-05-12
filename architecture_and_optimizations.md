@@ -50,5 +50,10 @@ O texto indexado e as descrições oriundas do banco não poluem o LLM ininterru
   - Original: `Produto: Saia Longa \n Detalhes: Uma linda saia confeccionada nos alpes suíços por monges tecelões para o verão... \n Preço: R$ 89 \n Estoque: P` (~60 tokens).
   - Truncado: `Produto: Saia Longa \n Detalhes: Uma linda saia confec... \n Preço: R$ 89 \n Estoque: P` (~20 tokens).
 
+### E. Cache Semântico Dinâmico e Seguro
+O sistema utiliza embeddings armazenados no Redis para responder imediatamente a requisições similares, poupando 100% dos tokens de geração no LLM. Para evitar falsos positivos e maximizar os acertos (Cache Hits), implementamos:
+- **Limiares Dinâmicos (Dynamic Thresholds)**: Em vez de usar um limiar rígido de similaridade, a nota de corte varia pelo estágio do funil. O estágio `greeting` ("Oi" vs "Olá") aceita limiar de `0.80` para abraçar mais variações. O estágio `stock_check` exige `0.93` para não confundir o modelo entre responder sobre um tamanho "P" ou "M".
+- **Isolamento por Estágio (Cross-Stage Safety)**: A *Query* vetorial no RediSearch filtra rigidamente o estágio de venda da conversa. Isso impossibilita que uma resposta ("Sim") salva na fase de saudação vaze erroneamente para uma fase crítica (como confirmação de pagamento).
+
 ## Conclusão e Teto de Consumo
 Essas arquiteturas aliadas garantem que uma requisição média interativa estabilize-se virtualmente de forma horizontal (flat line) gastando em torno de **500 a 800 tokens**, independentemente do tamanho atual da conversa ou da escala do catálogo da loja, viabilizando o ModAI em um ecossistema SaaS de alta rotatividade.

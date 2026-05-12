@@ -116,11 +116,11 @@ async def get_cached_response(
         # Normalize tenant_id (remove hyphens for RediSearch compatibility)
         clean_tenant = tenant_id.replace("-", "")
 
-        # Build KNN query filtered by tenant (TagField uses exact matching)
+        # Build KNN query filtered by tenant and stage
         q = (
             Query(
-                f"(@tenant_id:{{{clean_tenant}}}) => "
-                f"[KNN 1 @embedding $vec AS score]"
+                f"(@tenant_id:{{{clean_tenant}}} @stage:{stage}) => "
+                f"[KNN 3 @embedding $vec AS score]"
             )
             .sort_by("score")
             .return_fields("score", "message", "response", "stage")
@@ -132,32 +132,48 @@ async def get_cached_response(
             q, query_params={"vec": query_vector}
         )
 
-        if results.total == 0:
-            print(f"❌ Cache MISS: no entries found for tenant")
+        if not results.docs:
+            print(f"❌ Cache MISS: no entries found for tenant/stage")
             return None
 
-        doc = results.docs[0]
-        # Cosine distance: 0 = identical, 2 = opposite
-        # Convert to similarity: 1 - distance
-        distance = float(doc.score)
-        similarity = 1 - distance
+        # Dynamic threshold based on stage to avoid false positives in critical stages
+        thresholds = {
+            "greeting": 0.80,     # Greetings can vary ("oi bom dia" vs "ola bom dia")
+            "browsing": 0.90,     # Needs to be high to distinguish "azul" vs "preta"
+            "stock_check": 0.93,  # Needs to be very high for exact sizes
+            "support": 0.85,
+        }
+        threshold = thresholds.get(stage, settings.CACHE_SIMILARITY_THRESHOLD)
 
-        if similarity >= settings.CACHE_SIMILARITY_THRESHOLD:
-            response_data = json.loads(doc.response)
+        best_doc = None
+        best_sim = -1
+        
+        for doc in results.docs:
+            doc_stage = doc.stage.decode() if isinstance(doc.stage, bytes) else doc.stage
+            if doc_stage != stage:
+                continue
+            sim = 1 - float(doc.score)
+            if sim > best_sim:
+                best_sim = sim
+                best_doc = doc
+
+        if best_doc and best_sim >= threshold:
+            response_data = json.loads(best_doc.response)
+            orig_msg = best_doc.message.decode() if isinstance(best_doc.message, bytes) else best_doc.message
             print(
-                f"🎯 Cache HIT! similarity={similarity:.3f} "
-                f"(threshold={settings.CACHE_SIMILARITY_THRESHOLD}) "
-                f"original='{doc.message.decode() if isinstance(doc.message, bytes) else doc.message}'"
+                f"🎯 Cache HIT! similarity={best_sim:.3f} "
+                f"(threshold={threshold}) "
+                f"original='{orig_msg}'"
             )
             return {
                 "content": response_data["content"],
                 "model_used": "cache",
-                "similarity": similarity,
+                "similarity": best_sim,
             }
 
         print(
-            f"❌ Cache MISS: similarity={similarity:.3f} "
-            f"< threshold={settings.CACHE_SIMILARITY_THRESHOLD}"
+            f"❌ Cache MISS: max_similarity={best_sim:.3f} "
+            f"< threshold={threshold}"
         )
         return None
 

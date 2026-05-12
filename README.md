@@ -28,6 +28,7 @@ ModAI implements a sophisticated **LangGraph** pipeline with heavy emphasis on t
 - **Semantic Routing**: Distinguishes between simple greetings and product queries, completely bypassing database retrievals and saving hundreds of tokens on casual interactions.
 - **RAG Condensation**: Vector searches (RediSearch) retrieve only the Top-3 items, and long descriptions are truncated on the fly before prompt injection.
 - **Rolling Window Summarization**: Hard limits the raw conversation history (e.g., last 4 messages) to prevent exponential token growth. Older context is asynchronously compressed into tiny summaries by cheap/fast models (GPT-4o-mini/Gemini Flash) and kept in memory.
+- **Dynamic Semantic Caching**: Caches AI responses using vector similarity (Redis) with dynamic thresholds based on the conversation stage (e.g., lower threshold for generic greetings to maximize cache hits, and higher thresholds for product queries to ensure accuracy).
 - **Dual-Provider Fallbacks**: If the primary AI provider (OpenAI) rate-limits or fails, requests transparently cascade to the secondary provider (Google Gemini).
 
 ## 📦 Prototype Features
