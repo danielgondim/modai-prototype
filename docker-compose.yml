@@ -51,6 +51,27 @@ services:
     command: >
       uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
+  # ── AI Orchestrator (LangServe) ────────────────────────────
+  ai_orchestrator:
+    build:
+      context: ./ai_engine
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8080:8000"
+    environment:
+      - LANGCHAIN_TRACING_V2=${LANGCHAIN_TRACING_V2:-true}
+      - LANGSMITH_API_KEY=${LANGSMITH_API_KEY}
+      - LANGSMITH_PROJECT=${LANGSMITH_PROJECT:-modai-orchestrator}
+      - LANGSMITH_ENDPOINT=${LANGSMITH_ENDPOINT:-https://api.smith.langchain.com}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - REDIS_URL=redis://redis:6379/0
+      - CORE_BACKEND_URL=http://backend:8000
+    depends_on:
+      redis:
+        condition: service_healthy
+
   # ── Next.js Frontend ───────────────────────────────────────
   frontend:
     build:

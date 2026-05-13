@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 import os
 
 from app.config import get_settings
-from app.api import auth, catalog, product, customer, kanban, admin, chat
+from app.api import auth, catalog, product, customer, kanban, admin, chat, internal
 
 settings = get_settings()
 
@@ -52,6 +52,7 @@ app.include_router(product.router, prefix="/api")
 app.include_router(customer.router, prefix="/api")
 app.include_router(kanban.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
+app.include_router(internal.router, prefix="/internal")
 
 
 @app.get("/api/health")

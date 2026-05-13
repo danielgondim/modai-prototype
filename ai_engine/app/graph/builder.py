@@ -7,8 +7,8 @@ The graph routes messages through:
 """
 
 from langgraph.graph import StateGraph, END
-from app.services.graph.state import ChatState
-from app.services.graph.nodes import (
+from app.graph.state import ChatState
+from app.graph.nodes import (
     check_cache_node,
     classify_intent_node,
     rag_retrieve_node,

@@ -17,8 +17,6 @@ from app.models.message import Message
 from app.models.tenant import Tenant
 from app.models.kanban import KanbanCard, KanbanColumn
 from app.services.token_manager import check_token_limit, record_token_usage, HANDOFF_MESSAGE
-from app.services.graph.builder import get_chat_graph
-from app.services.graph.llm import get_fast_model
 from app.ai.prompts import SUMMARY_PROMPT
 from app.config import get_settings
 
@@ -60,8 +58,11 @@ async def process_message(
         else str(conversation.current_stage)
     )
 
-    # 4. Invoke LangGraph
-    graph = get_chat_graph()
+    # 4. Invoke LangGraph via AI Orchestrator (LangServe)
+    import os
+    import httpx
+    ai_url = os.getenv("AI_ORCHESTRATOR_URL", "http://ai_orchestrator:8080")
+    
     initial_state = {
         "tenant_id": str(tenant_id),
         "conversation_id": str(conversation.id),
@@ -73,12 +74,32 @@ async def process_message(
         "store_info": context["store_info"],
         "customer_info": context["customer_info"],
         "conversation_context": context["conversation_context"],
+        "tokens_input": 0,
+        "tokens_output": 0,
+        "total_cost_usd": 0.0,
     }
 
-    result = await graph.ainvoke(
-        initial_state,
-        config={"configurable": {"db": db}},
-    )
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{ai_url}/chat/invoke",
+                json={"input": initial_state},
+                timeout=30.0
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            result = data.get("output", {})
+    except Exception as e:
+        print(f"Error calling AI Orchestrator: {e}")
+        return {
+            "content": "Desculpe, o serviço de IA está indisponível no momento.",
+            "tokens_input": 0,
+            "tokens_output": 0,
+            "model_used": "error",
+            "from_cache": False,
+            "new_stage": current_stage,
+            "customer_updates": {},
+        }
 
     # 5. Post-graph DB operations
     new_stage = result.get("new_stage")
@@ -95,6 +116,19 @@ async def process_message(
             result.get("tokens_output", 0),
             result.get("model_used", "unknown"),
         )
+    
+    # 6. Save response in DB
+    assistant_msg = Message(
+        conversation_id=conversation.id,
+        role="assistant",
+        content=result.get("response", ""),
+        tokens_input=result.get("tokens_input", 0),
+        tokens_output=result.get("tokens_output", 0),
+        cost_usd=result.get("total_cost_usd", 0.0),
+        model_used=result.get("model_used"),
+        from_cache=result.get("from_cache", False),
+    )
+    db.add(assistant_msg)
 
     # Summarize conversation history in the background (awaited)
     await _summarize_history(db, conversation)
@@ -238,15 +272,22 @@ async def _summarize_history(db: AsyncSession, conversation: Conversation):
     prompt = SUMMARY_PROMPT.format(messages=context_text)
     
     try:
-        model = get_fast_model()
-        resp = await model.ainvoke(prompt)
-        new_summary = resp.content.strip()
-        
-        # update the JSON dict in the model
-        # Needs to assign a new dict so SQLAlchemy detects the change in JSONB
-        conversation.context_summary = {
-            "text": new_summary,
-            "last_id": str(unsummarized[-1].id)
-        }
+        import os
+        import httpx
+        # Send prompt to AI Engine to use fast model
+        ai_url = os.getenv("AI_ORCHESTRATOR_URL", "http://ai_orchestrator:8080")
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{ai_url}/internal/summarize",
+                json={"prompt": prompt},
+                timeout=10.0
+            )
+            if resp.status_code == 200:
+                new_summary = resp.json().get("summary", "")
+                
+                conversation.context_summary = {
+                    "text": new_summary,
+                    "last_id": str(unsummarized[-1].id)
+                }
     except Exception as e:
         print(f"Error summarizing conversation: {e}")

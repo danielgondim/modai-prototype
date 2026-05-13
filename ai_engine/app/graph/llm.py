@@ -18,8 +18,9 @@ def _setup_langsmith():
         os.environ["LANGCHAIN_TRACING_V2"] = "true"
         os.environ["LANGSMITH_API_KEY"] = settings.LANGSMITH_API_KEY
         os.environ["LANGCHAIN_PROJECT"] = settings.LANGSMITH_PROJECT
-        os.environ["LANGSMITH_ENDPOINT"] = "https://api.smith.langchain.com"
-        print(f"🔭 LangSmith tracing enabled → project: {settings.LANGSMITH_PROJECT}")
+        os.environ["LANGCHAIN_ENDPOINT"] = settings.LANGSMITH_ENDPOINT
+        os.environ["LANGSMITH_ENDPOINT"] = settings.LANGSMITH_ENDPOINT
+        print(f"🔭 LangSmith tracing enabled → project: {settings.LANGSMITH_PROJECT} at {settings.LANGSMITH_ENDPOINT}")
 
 
 _setup_langsmith()
@@ -77,7 +78,7 @@ def get_fast_model():
             model="gpt-4o-mini",
             api_key=settings.OPENAI_API_KEY,
             temperature=0,
-            max_tokens=30,
+            max_tokens=200,
         ))
 
     if settings.GOOGLE_API_KEY:
@@ -86,7 +87,7 @@ def get_fast_model():
             model="gemini-2.5-flash",
             google_api_key=settings.GOOGLE_API_KEY,
             temperature=0,
-            max_output_tokens=30,
+            max_output_tokens=200,
         ))
 
     if not models:

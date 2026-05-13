@@ -8,7 +8,11 @@
 # ========================
 # Python / FastAPI (Backend)
 # ========================
-__pycache__/
+**/__pycache__/
+**/.pytest_cache/
+**/.venv/
+**/venv/
+**/.ipynb_checkpoints/
 *.py[cod]
 *$py.class
 *.so
@@ -31,10 +35,7 @@ wheels/
 .pytest_cache/
 .coverage
 htmlcov/
-.venv/
-venv/
-ENV/
-env/
+# (Já cobertos pelos padrões recursivos acima)
 .mypy_cache/
 
 # ========================
@@ -55,8 +56,19 @@ next-env.d.ts
 # Project Specific (Uploads)
 # ========================
 backend/uploads/
+uploads/
+*.pdf
 # Se precisar subir a pasta vazia, descomente a linha abaixo e crie um .gitkeep lá dentro
 # !backend/uploads/.gitkeep
+
+# ========================
+# Dev Scripts & Tools
+# ========================
+smoke_test.py
+.gemini/
+.antigravity/
+debug.log
+
 
 # ========================
 # Docker

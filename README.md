@@ -1,151 +1,103 @@
-# ModAI - Smart Sales Chatbot
+# ModAI - Smart Sales Chatbot (Decoupled Architecture)
 
-ModAI is a SaaS platform designed to automate sales through a chatbot, initially focused on clothing stores. The system acts as a human-like virtual salesperson, welcoming potential customers, providing store information, sending PDF catalogs, answering questions, and helping with order assembly and checkout.
+ModAI is a SaaS platform designed to automate sales through an intelligent chatbot, initially focused on clothing stores. The system uses a modern microservices architecture, separating core business logic from complex AI orchestration.
 
-The system features intelligent routing that dynamically switches between AI providers (like OpenAI GPT and Google Gemini) depending on the interaction's complexity.
+## 🏗️ System Architecture
 
-## 🚀 Architecture & Tech Stack
+The project consists of 5 main containers working in harmony:
 
-The project uses a modern architecture with decoupled Frontend and Backend, orchestrated via Docker.
+```mermaid
+graph TD
+    User((User)) <--> Frontend[Frontend - Next.js]
+    Frontend <--> Backend[Core Backend - FastAPI]
+    Backend <--> DB[(PostgreSQL)]
+    Backend <--> Redis[(Redis Stack - Vectors/Cache)]
+    Backend <--> AI[AI Orchestrator - LangServe/LangGraph]
+    AI <--> Redis
+    AI <--> LLM{LLM Providers - OpenAI/Gemini}
+    AI -- Tracing --> LS[LangSmith]
+```
 
-### Backend
-- **Python 3.12+**
-- **FastAPI**: High-performance asynchronous web framework.
-- **SQLAlchemy (AsyncIO) + PostgreSQL**: ORM and relational database for data persistence (customers, messages, stock, etc.).
-- **Redis Stack**: Cache, sessions, and rate-limiting management.
-- **AI Integrations**: OpenAI (GPT-4o-mini, GPT-4o) and Google GenAI (Gemini 2.5 Flash, Gemini 1.5 Pro).
-- **FPDF2**: Dynamic generation of PDF catalogs.
+### 📦 Microservices & Components
 
-### Frontend
-- **Next.js 14+ (App Router)**: React framework for optimized user interfaces.
-- **React & Tailwind CSS**: Utility-first styled visual components.
-- **Lucide React**: Interface icons.
+#### 1. Core Backend (FastAPI)
+- **Responsibility**: State management, business rules, persistence, and administrative API.
+- **Database**: PostgreSQL for relational data (customers, messages, settings).
+- **Integration**: Acts as a client for the AI Orchestrator and manages initial catalog seeding/indexing.
 
-## 🧠 AI Architecture & Optimizations
+#### 2. AI Orchestrator (LangServe + LangGraph)
+- **Responsibility**: Conversation flow orchestration and AI graph execution.
+- **LangGraph**: Manages complex states, semantic routing, and information retrieval (RAG).
+- **LangServe**: Exposes the AI graph as an isolated service via HTTP.
+- **RAG**: Performs vector searches in Redis to find relevant products in real-time.
 
-ModAI implements a sophisticated **LangGraph** pipeline with heavy emphasis on token economy and reliability:
+#### 3. Redis Stack
+- **Semantic Cache**: Stores AI responses based on vector similarity to save tokens.
+- **Vector Store**: Stores product catalog embeddings for RAG.
 
-- **Semantic Routing**: Distinguishes between simple greetings and product queries, completely bypassing database retrievals and saving hundreds of tokens on casual interactions.
-- **RAG Condensation**: Vector searches (RediSearch) retrieve only the Top-3 items, and long descriptions are truncated on the fly before prompt injection.
-- **Rolling Window Summarization**: Hard limits the raw conversation history (e.g., last 4 messages) to prevent exponential token growth. Older context is asynchronously compressed into tiny summaries by cheap/fast models (GPT-4o-mini/Gemini Flash) and kept in memory.
-- **Dynamic Semantic Caching**: Caches AI responses using vector similarity (Redis) with dynamic thresholds based on the conversation stage (e.g., lower threshold for generic greetings to maximize cache hits, and higher thresholds for product queries to ensure accuracy).
-- **Dual-Provider Fallbacks**: If the primary AI provider (OpenAI) rate-limits or fails, requests transparently cascade to the secondary provider (Google Gemini).
+---
 
-## 📦 Prototype Features
+## 🧠 AI Intelligence & Token Economy
 
-1. **Chatbot (Customer Simulator)**
-   - Web interface simulating a WhatsApp conversation flow.
-   - Smart, contextual responses utilizing conversation history and real stock/product data.
-   - Automatic dispatch of **PDF Catalog** links when requested by the customer.
-2. **CRM and Store Management**
-   - **Sales Kanban**: Customer cards are automatically moved (e.g., Greeting → Browsing → Checkout) by the AI's intelligence.
-   - **Catalog & Product Management**: Allows creation of categories and uploading/replacing PDF catalogs.
-   - **Stock Management**: Control of sizes, colors, and quantities (the AI notifies the customer when items are out of stock).
-3. **SuperAdmin Dashboard**
-   - "Tenants" (Stores) management.
-   - Tracking of token usage and limits by the AI to control costs (SaaS).
+ModAI implements a sophisticated pipeline for cost control and performance:
 
-## 🛠️ How to Run Locally
+- **Semantic Routing**: Identifies simple greetings and responds via cache or fast models, saving thousands of tokens.
+- **Sliding Window with Summarization**: Message history is asynchronously compressed. Old messages become dense summaries, maintaining context without exceeding model token limits.
+- **Financial Monitoring (USD)**: Each interaction calculates the real cost in dollars based on the model used (GPT-4o, Mini, or Gemini Flash) and reports to LangSmith and the database.
+- **Cache Auto-Recovery**: The system automatically detects vector dimension mismatches and reconstructs Redis indices without manual intervention.
+
+---
+
+## 🚀 How to Run
 
 ### Prerequisites
-- [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/) installed on your machine.
-- API Keys (OpenAI and/or Google Gemini).
+- **Docker** and **Docker Compose**.
+- API Keys for **OpenAI** and/or **Google Gemini**.
+- **LangSmith** account (optional, for observability).
 
-### 1. Configure Environment Variables
-
-At the project root, there is a `.env.example` file. Copy it to `.env`:
-
-```bash
-cp .env.example .env
-```
-
-Open the `.env` file and fill in your API keys:
+### 1. Configuration
+Create a `.env` file at the root (use `.env.example` as a template):
 ```env
-OPENAI_API_KEY="sk-your-openai-key"
-GOOGLE_API_KEY="AIza-your-google-key"
+OPENAI_API_KEY="your_key"
+GOOGLE_API_KEY="your_key"
+LANGSMITH_API_KEY="your_key"
+LANGSMITH_PROJECT="ModAI"
 ```
 
-> **Note**: You do not need to change the database/redis credentials in the `.env.example` file if you are going to run everything via Docker.
-
-### 2. Start the Containers
-
-Run the following command at the project root to build and start all services:
-
+### 2. Startup
 ```bash
 docker compose up -d --build
 ```
+This will start:
+- **Frontend**: [http://localhost:3000](http://localhost:3000)
+- **Core API**: [http://localhost:8000/docs](http://localhost:8000/docs)
+- **AI Engine**: [http://localhost:8080/chat/playground/](http://localhost:8080/chat/playground/)
 
-Docker will start 4 containers:
-- `db`: PostgreSQL Database (on local port `5433`).
-- `redis`: Redis Database.
-- `backend`: FastAPI API.
-- `frontend`: Next.js Application.
+---
 
-### 3. Data Seeding (Automatic)
-
-When running the backend for the first time, the database will automatically be created and populated with a fictional store ("Moda Estrela"), sample products, PDF catalogs, stock items, and administrative users.
-
-### 4. Access the Platform
-
-- **Frontend (Chat and Dashboards)**: [http://localhost:3000](http://localhost:3000)
-- **Backend (API Documentation)**: [http://localhost:8000/docs](http://localhost:8000/docs)
-
-### Access Credentials (Generated in Seed)
-
-| Dashboard | Email | Password |
-| :--- | :--- | :--- |
-| **Store CRM** | `admin@modaestrela.com` | `admin123` |
-| **Super Admin** | `superadmin@modai.com` | `super123` |
-
-## 🔄 Applying Code Changes
-
-The environment is configured for **Hot-Reloading**. This means the vast majority of changes you make to local files (both in the Next.js frontend and FastAPI backend) will be detected immediately, updating the server automatically without needing to restart the containers.
-
-### When do I need to restart or rebuild?
-You only need to rebuild the containers (`rebuild`) if you:
-1. Install new dependencies (e.g., altering `package.json` in the frontend or `pyproject.toml` in the backend).
-2. Change environment variables in the `.env` file or modify service ports in `docker-compose.yml`.
-3. Feel that the container has "frozen" or lost volume synchronization.
-
-### Command to update and run the latest version
-If you made changes that require a rebuild (such as new libraries), run:
-
-```bash
-# Tear down current containers
-docker compose down
-
-# Rebuild images and start them in the background again
-docker compose up -d --build
-```
-
-## 📁 Directory Structure
+## 📁 Project Structure
 
 ```
 .
-├── backend/                  # Python FastAPI API Source Code
+├── backend/                # Business Rules & Persistence
 │   ├── app/
-│   │   ├── ai/               # Prompts and LLM logic
-│   │   ├── api/              # HTTP Routes (Controllers)
-│   │   ├── models/           # SQLAlchemy Entities
-│   │   ├── services/         # Business logic and Chat Engine
-│   │   ├── main.py           # FastAPI entry point
-│   │   └── seed.py           # Initial database population script
-│   ├── uploads/              # Locally generated files (like Catalog PDFs)
-│   └── Dockerfile
-├── frontend/                 # Next.js app Source Code
-│   ├── src/
-│   │   ├── app/              # Pages (Chat, Login, CRM, Admin)
-│   │   └── lib/              # Utilities (e.g., api.ts)
-│   └── Dockerfile
-├── docker-compose.yml        # Local orchestrator
-└── .env                      # Secret environment variables
+│   │   ├── api/            # REST Endpoints
+│   │   ├── models/         # PostgreSQL Tables
+│   │   ├── services/       # Integration Clients & Token Manager
+│   │   └── seed.py         # Auto-creation of tables and data
+├── ai_engine/              # AI "Brain" (Isolated)
+│   ├── app/
+│   │   ├── graph/          # LangGraph Definition (Nodes, Logic)
+│   │   ├── cache_service.py# Semantic Cache Logic
+│   │   ├── rag_service.py  # Vector Product Search
+│   │   └── server.py       # LangServe API
+├── frontend/               # Next.js Interface (CRM & Chat)
+└── docker-compose.yml      # Infrastructure Orchestrator
 ```
 
-## 🧹 Cleaning the Environment
-
-If you wish to wipe the database and start from scratch:
-
+## 🧹 Database Maintenance
+To completely reset the database and search indices (total wipe):
 ```bash
 docker compose down -v
+docker compose up -d
 ```
-*(The `-v` flag removes the persistent Postgres and Redis volumes. Upon restarting, the initial seed will run again).*

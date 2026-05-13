@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, DateTime, ForeignKey, Integer, Text, Boolean
+from sqlalchemy import String, DateTime, ForeignKey, Integer, Text, Boolean, Numeric
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
@@ -23,6 +23,7 @@ class Message(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     tokens_input: Mapped[int] = mapped_column(Integer, default=0)
     tokens_output: Mapped[int] = mapped_column(Integer, default=0)
+    cost_usd: Mapped[float] = mapped_column(Numeric(10, 8), default=0.0)
     model_used: Mapped[str | None] = mapped_column(String(50), nullable=True)
     from_cache: Mapped[bool] = mapped_column(Boolean, default=False)
     from_human: Mapped[bool] = mapped_column(Boolean, default=False)

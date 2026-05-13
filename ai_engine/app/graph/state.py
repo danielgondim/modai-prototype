@@ -5,7 +5,8 @@ and returns a partial dict that gets merged back into the state.
 """
 
 from __future__ import annotations
-from typing import TypedDict
+from typing import TypedDict, Annotated
+import operator
 
 
 class ChatState(TypedDict, total=False):
@@ -30,7 +31,9 @@ class ChatState(TypedDict, total=False):
     response: str
     new_stage: str | None
     model_used: str | None
-    tokens_input: int
-    tokens_output: int
+    tokens_input: Annotated[int, operator.add]
+    tokens_output: Annotated[int, operator.add]
+    total_cost_usd: Annotated[float, operator.add]
     from_cache: bool
     customer_updates: dict
+

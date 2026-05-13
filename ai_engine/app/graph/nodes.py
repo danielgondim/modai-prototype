@@ -6,15 +6,44 @@ fallback (OpenAI ↔ Gemini) and LangSmith tracing.
 """
 
 from app.config import get_settings
-from app.services.graph.state import ChatState
-from app.services.graph.llm import get_chat_model, get_fast_model
-from app.services.cache_service import get_cached_response, cache_response
-from app.services.rag_service import retrieve_with_fresh_stock
+from app.graph.state import ChatState
+from app.graph.llm import get_chat_model, get_fast_model
+from app.cache_service import get_cached_response, cache_response
+from app.rag_service import retrieve_with_fresh_stock
 from app.ai.prompts import SYSTEM_PROMPT_TEMPLATE, STAGE_CLASSIFIER_PROMPT
-from app.models.conversation import ConversationStage
 from langchain_core.runnables import RunnableConfig
 
 settings = get_settings()
+
+
+def _calculate_model_cost(model_name: str, tokens_in: int, tokens_out: int) -> float:
+    """Calculate the USD cost of an LLM call based on token usage.
+    Prices are per 1M tokens (estimates).
+    """
+    model_name = model_name.lower()
+    
+    # Pricing per 1M tokens
+    PRICES = {
+        "gpt-4o": {"in": 5.0, "out": 15.0},
+        "gpt-4o-mini": {"in": 0.15, "out": 0.60},
+        "gemini-2.5-flash": {"in": 0.075, "out": 0.30},
+        "gemini-2.0-flash": {"in": 0.075, "out": 0.30},
+        "gemini-1.5-flash": {"in": 0.075, "out": 0.30},
+    }
+
+    # Find the best match for the model name
+    matched_price = None
+    for key, price in PRICES.items():
+        if key in model_name:
+            matched_price = price
+            break
+            
+    if not matched_price:
+        # Default to gpt-4o-mini prices if unknown
+        matched_price = PRICES["gpt-4o-mini"]
+        
+    cost = (tokens_in * matched_price["in"] / 1_000_000) + (tokens_out * matched_price["out"] / 1_000_000)
+    return cost
 
 
 # ── Node 1: Check Semantic Cache ──────────────────────────────
@@ -51,9 +80,17 @@ async def classify_intent_node(state: ChatState) -> dict:
         f"Mensagem: \"{state['user_message']}\"\n"
         "Responda APENAS com needs_products ou direct."
     )
+    tokens_in = 0
+    tokens_out = 0
     try:
         model = get_fast_model()
         resp = await model.ainvoke(prompt)
+        
+        usage = getattr(resp, "usage_metadata", None)
+        if usage:
+            tokens_in = usage.get("input_tokens", 0)
+            tokens_out = usage.get("output_tokens", 0)
+
         intent = resp.content.strip().lower()
         if intent not in ("needs_products", "direct"):
             intent = "needs_products"  # default to safe option
@@ -61,18 +98,25 @@ async def classify_intent_node(state: ChatState) -> dict:
         print(f"Intent classification error: {e}")
         intent = "needs_products"
 
-    return {"intent": intent}
+    # Assume fast model is used (mini/flash)
+    model_name = "gpt-4o-mini" # or gemini-flash
+    cost = _calculate_model_cost(model_name, tokens_in, tokens_out)
+
+    return {
+        "intent": intent, 
+        "tokens_input": tokens_in, 
+        "tokens_output": tokens_out,
+        "total_cost_usd": cost
+    }
 
 
 # ── Node 3: RAG Retrieve ─────────────────────────────────────
 
 async def rag_retrieve_node(state: ChatState, config: RunnableConfig) -> dict:
     """Retrieve relevant products via vector similarity search."""
-    db = config["configurable"]["db"]
     products_context = await retrieve_with_fresh_stock(
         query=state["user_message"],
         tenant_id=state["tenant_id"],
-        db=db,
     )
     return {"relevant_products": products_context}
 
@@ -125,13 +169,15 @@ async def generate_response_node(state: ChatState) -> dict:
         tokens_in = usage.get("input_tokens", 0)
         tokens_out = usage.get("output_tokens", 0)
 
-    model_name = getattr(resp, "response_metadata", {}).get("model_name", None)
+    model_name = getattr(resp, "response_metadata", {}).get("model_name", "unknown")
+    cost = _calculate_model_cost(model_name, tokens_in, tokens_out)
 
     return {
         "response": resp.content,
-        "model_used": model_name or "unknown",
+        "model_used": model_name,
         "tokens_input": tokens_in,
         "tokens_output": tokens_out,
+        "total_cost_usd": cost,
     }
 
 
@@ -143,18 +189,32 @@ async def classify_stage_node(state: ChatState) -> dict:
         message=state["user_message"],
         current_stage=state["current_stage"],
     )
+    tokens_in = 0
+    tokens_out = 0
     try:
         model = get_fast_model()
         resp = await model.ainvoke(prompt)
+
+        usage = getattr(resp, "usage_metadata", None)
+        if usage:
+            tokens_in = usage.get("input_tokens", 0)
+            tokens_out = usage.get("output_tokens", 0)
+
         stage = resp.content.strip().lower()
 
-        valid_stages = [s.value for s in ConversationStage]
+        model_name = "gpt-4o-mini"
+        cost = _calculate_model_cost(model_name, tokens_in, tokens_out)
+
+        valid_stages = ["lead", "negociacao", "fechado", "perdido"] # Hardcoded for isolation
+        update = {"tokens_input": tokens_in, "tokens_output": tokens_out, "total_cost_usd": cost}
         if stage in valid_stages:
-            return {"new_stage": stage}
-        return {"new_stage": state["current_stage"]}
+            update["new_stage"] = stage
+            return update
+        update["new_stage"] = state["current_stage"]
+        return update
     except Exception as e:
         print(f"Stage classification error: {e}")
-        return {"new_stage": None}
+        return {"new_stage": None, "tokens_input": tokens_in, "tokens_output": tokens_out, "total_cost_usd": 0.0}
 
 
 # ── Node 6: Extract Customer Name ────────────────────────────
@@ -176,16 +236,30 @@ async def extract_name_node(state: ChatState) -> dict:
         "identificável na mensagem, responda EXATAMENTE com a palavra NONE.\n\n"
         f"Mensagem: '{state['user_message']}'"
     )
+    tokens_in = 0
+    tokens_out = 0
     try:
         model = get_fast_model()
         resp = await model.ainvoke(prompt)
+
+        usage = getattr(resp, "usage_metadata", None)
+        if usage:
+            tokens_in = usage.get("input_tokens", 0)
+            tokens_out = usage.get("output_tokens", 0)
+
         text = resp.content.strip()
         if text.upper() != "NONE" and len(text) < 20:
             customer_updates["name"] = text.replace(".", "").replace(",", "").title()
     except Exception as e:
         print(f"Name extraction error: {e}")
 
-    return {"customer_updates": customer_updates}
+    cost = _calculate_model_cost("gpt-4o-mini", tokens_in, tokens_out)
+    return {
+        "customer_updates": customer_updates, 
+        "tokens_input": tokens_in, 
+        "tokens_output": tokens_out,
+        "total_cost_usd": cost
+    }
 
 
 # ── Node 7: Persist (cache + token recording placeholder) ────
